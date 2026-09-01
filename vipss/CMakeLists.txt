@@ -110,11 +110,30 @@ file(GLOB PREDICATES_LIST ./adgrid/predicates/predicates.c)
 add_library(adgrid ${ADGRID_LIST}  ${NANOTHREAD_LIST} ${MSHIO_LIST} ${PREDICATES_LIST} )
 target_include_directories(adgrid PUBLIC ./adgrid/include )
 target_include_directories(adgrid PUBLIC ./adgrid/include/mshio )
-# target_link_libraries(adgrid  nlohmann_json::nlohmann_json atomic)
 target_link_libraries(adgrid
     PUBLIC pico_tree nlopt nlohmann_json::nlohmann_json Eigen3::Eigen CLI11
-    PRIVATE atomic
 )
+
+# GCC may lower 16-byte atomic operations to calls in libatomic. Apple Clang
+# provides these operations through its compiler runtime and has no libatomic.
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles("\
+struct alignas(16) AtomicPair { void *pointer; unsigned long long value; };
+bool compare_exchange(AtomicPair *pointer, AtomicPair *expected,
+                      AtomicPair *desired) {
+    return __atomic_compare_exchange(pointer, expected, desired, true,
+                                     __ATOMIC_RELEASE, __ATOMIC_RELAXED);
+}
+int main() {
+    AtomicPair pointer{}, expected{}, desired{};
+    return compare_exchange(&pointer, &expected, &desired) ? 0 : 1;
+}
+" ADGRID_HAS_BUILTIN_16_BYTE_ATOMICS)
+
+if(NOT ADGRID_HAS_BUILTIN_16_BYTE_ATOMICS)
+    find_library(ADGRID_ATOMIC_LIBRARY NAMES atomic REQUIRED)
+    target_link_libraries(adgrid PRIVATE ${ADGRID_ATOMIC_LIBRARY})
+endif()
 
 ## The local_vipss binary
 aux_source_directory(./src SRC_LIST)
