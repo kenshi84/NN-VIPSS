@@ -1189,9 +1189,10 @@ double LocalVipss::NatureNeighborDistanceFunctionOMP(const tetgenmesh::point cur
     for( i = 0; i < nn_num; ++i)
     {
         auto nn_pt = nei_pts[i];
-        if(VoronoiGen::point_id_map_.find(nn_pt) != VoronoiGen::point_id_map_.end())
+        const auto point_iter = VoronoiGen::point_id_map_.find(nn_pt);
+        if(point_iter != VoronoiGen::point_id_map_.end())
         {
-            size_t pid = VoronoiGen::point_id_map_[nn_pt];
+            size_t pid = point_iter->second;
             // std::cout << " n id 1111  " << pid << std::endl;
             const arma::vec& a = node_rbf_vec_[pid]->a;
             const arma::vec& b = node_rbf_vec_[pid]->b;
@@ -1203,9 +1204,8 @@ double LocalVipss::NatureNeighborDistanceFunctionOMP(const tetgenmesh::point cur
             // std::cout << " b size  " << b.size() << std::endl;
             nn_dist_vec_[i] = HRBF_Dist_Alone(cur_pt,  a, b, cluster_pids, all_pts);
             // std::cout << " cur pt dist :  " << nn_dist_vec_[i] << std::endl;
-            int thread_id = omp_get_thread_num();
             // nn_volume_vec_[i] = 1.0;
-            nn_volume_vec_[i] = voro_gen_.CalTruncatedCellVolumePassOMP(cur_pt, nn_pt, thread_id); 
+            nn_volume_vec_[i] = voro_gen_.CalTruncatedCellVolumePassOMP(cur_pt, nn_pt);
         } 
     }
     auto t1 = Clock::now();
@@ -1249,9 +1249,10 @@ double LocalVipss::NatureNeighborGradientOMP(const tetgenmesh::point cur_pt, dou
     for( i = 0; i < nn_num; ++i)
     {
         auto nn_pt = nei_pts[i];
-        if(VoronoiGen::point_id_map_.find(nn_pt) != VoronoiGen::point_id_map_.end())
+        const auto point_iter = VoronoiGen::point_id_map_.find(nn_pt);
+        if(point_iter != VoronoiGen::point_id_map_.end())
         {
-            size_t pid = VoronoiGen::point_id_map_[nn_pt];
+            size_t pid = point_iter->second;
             const arma::vec& a = node_rbf_vec_[pid]->a;
             const arma::vec& b = node_rbf_vec_[pid]->b;
             // const std::vector<size_t>& cluster_pids = VoronoiGen::cluster_init_pids_[pid];
@@ -1262,10 +1263,9 @@ double LocalVipss::NatureNeighborGradientOMP(const tetgenmesh::point cur_pt, dou
             gx_vec_[i] = gx;
             gy_vec_[i] = gy;
             gz_vec_[i] = gz;
-            int thread_id = omp_get_thread_num();
-            // nn_volume_vec_[i] = voro_gen_.CalTruncatedCellVolumePassOMP(cur_pt, nn_pt, thread_id); 
+            // nn_volume_vec_[i] = voro_gen_.CalTruncatedCellVolumePassOMP(cur_pt, nn_pt);
             arma::vec3 vol_grad; 
-            nn_volume_vec_[i] = voro_gen_.CalTruncatedCellVolumeGradientOMP(cur_pt, nn_pt, vol_grad, thread_id);
+            nn_volume_vec_[i] = voro_gen_.CalTruncatedCellVolumeGradientOMP(cur_pt, nn_pt, vol_grad);
             nn_vol_grads_[i] = vol_grad;
         }
     }

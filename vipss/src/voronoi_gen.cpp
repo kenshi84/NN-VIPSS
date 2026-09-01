@@ -11,19 +11,43 @@
 // #include <libqhullcpp/RboxPoints.h>
 // #include <libqhull/qhull_a.h>
 #include "sample.h"
-#include "omp.h"
 
 typedef std::chrono::high_resolution_clock Clock;
 
 REAL cps = (REAL) CLOCKS_PER_SEC;
 // double M_PI  = 2*acos(0.0);
 
-const int MAX_ELEMENT_ = 8000;
-const int MAX_THREAD_NUM_ = 32;
-double* truncated_tets_omp_[MAX_THREAD_NUM_][MAX_ELEMENT_*2];
-// double truncated_centers_omp_[MAX_THREAD_NUM_][3];
-double intersect_pts_omp_[MAX_THREAD_NUM_][MAX_ELEMENT_];
-int face_tet_count_omp_[MAX_THREAD_NUM_][MAX_ELEMENT_];
+namespace {
+
+struct TruncatedCellScratch
+{
+    std::vector<double*> truncated_tets;
+    std::vector<double> intersect_pts;
+    std::vector<int> face_tet_count;
+
+    void prepare(const int* v_cell, const tetgenio::vorofacet* vf_list)
+    {
+        const size_t face_count = static_cast<size_t>(v_cell[0]);
+        size_t edge_count = 0;
+        for(size_t i = 0; i < face_count; ++i)
+        {
+            const size_t facet_id = static_cast<size_t>(v_cell[i + 1]);
+            edge_count += static_cast<size_t>(vf_list[facet_id].elist[0]);
+        }
+
+        // Each edge can contribute one clipped tetrahedron. An intersected
+        // face contributes one additional closing tetrahedron and up to one
+        // intersection point per edge. Keep a little extra point capacity for
+        // the two-point face representation used below.
+        truncated_tets.resize(2 * (edge_count + face_count));
+        intersect_pts.resize(3 * (edge_count + 2 * face_count));
+        face_tet_count.resize(face_count);
+    }
+};
+
+thread_local TruncatedCellScratch truncated_cell_scratch;
+
+}
 
 void VoronoiGen::loadData(const std::string& path )
 {
@@ -783,7 +807,7 @@ void VoroPlane::SavePlane(const std::string& outpath)
     out_file.close();
 }
 
-double VoronoiGen::CalTruncatedCellVolumePassOMP(tetgenmesh::point in_pt, tetgenmesh::point nei_pt, int thread_id)
+double VoronoiGen::CalTruncatedCellVolumePassOMP(tetgenmesh::point in_pt, tetgenmesh::point nei_pt)
 {
     double plane_mid_x = (in_pt[0] + nei_pt[0])/2.0;
     double plane_mid_y = (in_pt[1] + nei_pt[1])/2.0;
@@ -798,10 +822,10 @@ double VoronoiGen::CalTruncatedCellVolumePassOMP(tetgenmesh::point in_pt, tetgen
         p_ny /= pn_len;
         p_nz /= pn_len;
     }
-    // if(point_id_map_.find(nei_pt) == point_id_map_.end())
-    // return 0;
-    const auto vc_id   = point_id_map_[nei_pt];
-    // if(vc_id >= voronoi_data_.numberofvcells) return 0;
+    const auto point_iter = point_id_map_.find(nei_pt);
+    if(point_iter == point_id_map_.end()) return 0;
+    const auto vc_id = point_iter->second;
+    if(vc_id < 0 || vc_id >= voronoi_data_.numberofvcells) return 0;
     const auto v_cell  = voronoi_data_.vcelllist[vc_id];
     const auto vf_list = voronoi_data_.vfacetlist;
     const auto ve_list = voronoi_data_.vedgelist;
@@ -810,11 +834,10 @@ double VoronoiGen::CalTruncatedCellVolumePassOMP(tetgenmesh::point in_pt, tetgen
     if(v_cell == NULL) return 0;
     const int f_num = v_cell[0];
 
-    int cur_opm_id = thread_id;
-    double* intersect_pts = intersect_pts_omp_[cur_opm_id];
-    // double* trunc_center = truncated_centers_omp_[cur_opm_id];
-    double** trunc_tets = truncated_tets_omp_[cur_opm_id];
-    int* face_tet_count = face_tet_count_omp_[cur_opm_id];
+    truncated_cell_scratch.prepare(v_cell, vf_list);
+    double* intersect_pts = truncated_cell_scratch.intersect_pts.data();
+    double** trunc_tets = truncated_cell_scratch.truncated_tets.data();
+    int* face_tet_count = truncated_cell_scratch.face_tet_count.data();
 
     int intersect_total_count = 0;
     int tet_total_count = 0;
@@ -866,7 +889,7 @@ double VoronoiGen::CalTruncatedCellVolumePassOMP(tetgenmesh::point in_pt, tetgen
             } 
         }
         // printf("intersect_count num : %d \n", intersect_count);
-        if(intersect_count > 0)
+        if(intersect_count >= 2)
         {
             trunc_tets[(tet_total_count + tet_count)*2] = &intersect_pts[3 * (intersect_total_count)];
             trunc_tets[(tet_total_count + tet_count)*2 + 1] = &intersect_pts[3 * intersect_total_count + 3];
@@ -886,6 +909,7 @@ double VoronoiGen::CalTruncatedCellVolumePassOMP(tetgenmesh::point in_pt, tetgen
         for(size_t i = 0; i < f_num; ++i)
         {
             const int f_tet_num = face_tet_count[i];
+            if(f_tet_num == 0) continue;
             const auto f_pt = trunc_tets[cur_tet_id*2];
             // printf("cur face f_tet_num : %d \n", f_tet_num);
             for(int ti = 0; ti < f_tet_num; ++ti )
@@ -903,9 +927,10 @@ double VoronoiGen::CalTruncatedCellVolumePassOMP(tetgenmesh::point in_pt, tetgen
     return 0;
 }
 
-double VoronoiGen::CalTruncatedCellVolumeGradientOMP(tetgenmesh::point in_pt, tetgenmesh::point nei_pt, 
-                                                        arma::vec3& gradient, int thread_id)
+double VoronoiGen::CalTruncatedCellVolumeGradientOMP(tetgenmesh::point in_pt, tetgenmesh::point nei_pt,
+                                                        arma::vec3& gradient)
 {
+    gradient.zeros();
     double plane_mid_x = (in_pt[0] + nei_pt[0])/2.0;
     double plane_mid_y = (in_pt[1] + nei_pt[1])/2.0;
     double plane_mid_z = (in_pt[2] + nei_pt[2])/2.0;
@@ -919,10 +944,10 @@ double VoronoiGen::CalTruncatedCellVolumeGradientOMP(tetgenmesh::point in_pt, te
         p_ny /= pn_len;
         p_nz /= pn_len;
     }
-    // if(point_id_map_.find(nei_pt) == point_id_map_.end())
-    // return 0;
-    const auto vc_id   = point_id_map_[nei_pt];
-    // if(vc_id >= voronoi_data_.numberofvcells) return 0;
+    const auto point_iter = point_id_map_.find(nei_pt);
+    if(point_iter == point_id_map_.end()) return 0;
+    const auto vc_id = point_iter->second;
+    if(vc_id < 0 || vc_id >= voronoi_data_.numberofvcells) return 0;
     const auto v_cell  = voronoi_data_.vcelllist[vc_id];
     const auto vf_list = voronoi_data_.vfacetlist;
     const auto ve_list = voronoi_data_.vedgelist;
@@ -931,11 +956,10 @@ double VoronoiGen::CalTruncatedCellVolumeGradientOMP(tetgenmesh::point in_pt, te
     if(v_cell == NULL) return 0;
     const int f_num = v_cell[0];
 
-    int cur_opm_id = thread_id;
-    double* intersect_pts = intersect_pts_omp_[cur_opm_id];
-    // double* trunc_center = truncated_centers_omp_[cur_opm_id];
-    double** trunc_tets = truncated_tets_omp_[cur_opm_id];
-    int* face_tet_count = face_tet_count_omp_[cur_opm_id];
+    truncated_cell_scratch.prepare(v_cell, vf_list);
+    double* intersect_pts = truncated_cell_scratch.intersect_pts.data();
+    double** trunc_tets = truncated_cell_scratch.truncated_tets.data();
+    int* face_tet_count = truncated_cell_scratch.face_tet_count.data();
 
     int intersect_total_count = 0;
     int tet_total_count = 0;
@@ -987,7 +1011,7 @@ double VoronoiGen::CalTruncatedCellVolumeGradientOMP(tetgenmesh::point in_pt, te
             } 
         }
         // printf("intersect_count num : %d \n", intersect_count);
-        if(intersect_count > 0)
+        if(intersect_count >= 2)
         {
             trunc_tets[(tet_total_count + tet_count)*2] = &intersect_pts[3 * (intersect_total_count)];
             trunc_tets[(tet_total_count + tet_count)*2 + 1] = &intersect_pts[3 * intersect_total_count + 3];
@@ -1001,7 +1025,7 @@ double VoronoiGen::CalTruncatedCellVolumeGradientOMP(tetgenmesh::point in_pt, te
     double cell_volume = 0;
     if(intersect_total_count > 0)
     {
-        std::array<double,3> truncated_face_center;
+        std::array<double,3> truncated_face_center{};
         for(int ii = 0; ii < intersect_total_count; ++ii)
         {
             truncated_face_center[0] += intersect_pts[3 * ii];
@@ -1014,7 +1038,7 @@ double VoronoiGen::CalTruncatedCellVolumeGradientOMP(tetgenmesh::point in_pt, te
 
         // std::vector<std::array<double, 3>> triangle_centers(intersect_total_count/2);
         std::vector<double> triangle_areas(intersect_total_count/2);
-        arma::vec3 f_centroid; 
+        arma::vec3 f_centroid = {0, 0, 0};
         double f_area = 0.0;
         for(int ii = 0; ii < intersect_total_count/2; ++ii)
         {
@@ -1023,13 +1047,13 @@ double VoronoiGen::CalTruncatedCellVolumeGradientOMP(tetgenmesh::point in_pt, te
             tri_center[1] = (intersect_pts[3 * (2 * ii) + 1] + intersect_pts[3 * (2 * ii + 1) + 1] + truncated_face_center[1])/3;
             tri_center[2] = (intersect_pts[3 * (2 * ii) + 2] + intersect_pts[3 * (2 * ii + 1) + 2] + truncated_face_center[2])/3;
             arma::mat triMat(2, 3);
-            triMat[0,0] = intersect_pts[3 * (2 * ii)]     - truncated_face_center[0];
-            triMat[0,1] = intersect_pts[3 * (2 * ii) + 1] - truncated_face_center[1];
-            triMat[0,2] = intersect_pts[3 * (2 * ii) + 2] - truncated_face_center[2];
+            triMat(0,0) = intersect_pts[3 * (2 * ii)]     - truncated_face_center[0];
+            triMat(0,1) = intersect_pts[3 * (2 * ii) + 1] - truncated_face_center[1];
+            triMat(0,2) = intersect_pts[3 * (2 * ii) + 2] - truncated_face_center[2];
 
-            triMat[1,0] = intersect_pts[3 * (2 * ii + 1)]     - truncated_face_center[0];
-            triMat[1,1] = intersect_pts[3 * (2 * ii + 1) + 1] - truncated_face_center[1];
-            triMat[1,2] = intersect_pts[3 * (2 * ii + 1) + 2] - truncated_face_center[2];
+            triMat(1,0) = intersect_pts[3 * (2 * ii + 1)]     - truncated_face_center[0];
+            triMat(1,1) = intersect_pts[3 * (2 * ii + 1) + 1] - truncated_face_center[1];
+            triMat(1,2) = intersect_pts[3 * (2 * ii + 1) + 2] - truncated_face_center[2];
             double area = sqrt(arma::det(triMat * triMat.t())) * 0.5;
             f_area += area;
             f_centroid += tri_center * area;
@@ -1046,6 +1070,7 @@ double VoronoiGen::CalTruncatedCellVolumeGradientOMP(tetgenmesh::point in_pt, te
         for(size_t i = 0; i < f_num; ++i)
         {
             const int f_tet_num = face_tet_count[i];
+            if(f_tet_num == 0) continue;
             const auto f_pt = trunc_tets[cur_tet_id*2];
             // printf("cur face f_tet_num : %d \n", f_tet_num);
             for(int ti = 0; ti < f_tet_num; ++ti )
