@@ -117,7 +117,8 @@ target_link_libraries(adgrid
 # GCC may lower 16-byte atomic operations to calls in libatomic. Apple Clang
 # provides these operations through its compiler runtime and has no libatomic.
 include(CheckCXXSourceCompiles)
-check_cxx_source_compiles("\
+include(CMakePushCheckState)
+set(ADGRID_16_BYTE_ATOMICS_TEST_SOURCE "\
 struct alignas(16) AtomicPair { void *pointer; unsigned long long value; };
 bool compare_exchange(AtomicPair *pointer, AtomicPair *expected,
                       AtomicPair *desired) {
@@ -128,11 +129,30 @@ int main() {
     AtomicPair pointer{}, expected{}, desired{};
     return compare_exchange(&pointer, &expected, &desired) ? 0 : 1;
 }
-" ADGRID_HAS_BUILTIN_16_BYTE_ATOMICS)
+")
+
+cmake_push_check_state(RESET)
+check_cxx_source_compiles("${ADGRID_16_BYTE_ATOMICS_TEST_SOURCE}"
+                          ADGRID_HAS_BUILTIN_16_BYTE_ATOMICS)
+cmake_pop_check_state()
 
 if(NOT ADGRID_HAS_BUILTIN_16_BYTE_ATOMICS)
-    find_library(ADGRID_ATOMIC_LIBRARY NAMES atomic REQUIRED)
-    target_link_libraries(adgrid PRIVATE ${ADGRID_ATOMIC_LIBRARY})
+    # Ask the compiler driver to resolve -latomic. find_library() does not
+    # necessarily search compiler-private runtime directories such as
+    # /usr/lib/gcc/<triple>/<version>, where GCC commonly installs it.
+    cmake_push_check_state(RESET)
+    set(CMAKE_REQUIRED_LIBRARIES atomic)
+    check_cxx_source_compiles("${ADGRID_16_BYTE_ATOMICS_TEST_SOURCE}"
+                              ADGRID_HAS_16_BYTE_ATOMICS_WITH_LIBATOMIC)
+    cmake_pop_check_state()
+
+    if(ADGRID_HAS_16_BYTE_ATOMICS_WITH_LIBATOMIC)
+        target_link_libraries(adgrid PRIVATE atomic)
+    else()
+        message(FATAL_ERROR
+            "The compiler does not provide the required 16-byte atomic operations, "
+            "and they are not available through libatomic.")
+    endif()
 endif()
 
 ## The local_vipss binary
