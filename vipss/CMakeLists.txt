@@ -46,7 +46,7 @@ set(NLOPT_MATLAB OFF CACHE BOOL "" FORCE)
 set(NLOPT_GUILE OFF CACHE BOOL "" FORCE)
 set(NLOPT_JAVA OFF CACHE BOOL "" FORCE)
 set(NLOPT_SWIG OFF CACHE BOOL "" FORCE)
-set(NLOPT_LUKSAN OFF CACHE BOOL "" FORCE)
+set(NLOPT_LUKSAN ON CACHE BOOL "" FORCE)
 set(NLOPT_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable( NLopt )
 
@@ -111,7 +111,10 @@ add_library(adgrid ${ADGRID_LIST}  ${NANOTHREAD_LIST} ${MSHIO_LIST} ${PREDICATES
 target_include_directories(adgrid PUBLIC ./adgrid/include )
 target_include_directories(adgrid PUBLIC ./adgrid/include/mshio )
 # target_link_libraries(adgrid  nlohmann_json::nlohmann_json atomic)
-target_link_libraries(adgrid PUBLIC pico_tree nlopt nlohmann_json::nlohmann_json Eigen3::Eigen CLI11 )
+target_link_libraries(adgrid
+    PUBLIC pico_tree nlopt nlohmann_json::nlohmann_json Eigen3::Eigen CLI11
+    PRIVATE atomic
+)
 
 ## The local_vipss binary
 aux_source_directory(./src SRC_LIST)

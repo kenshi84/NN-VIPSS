@@ -33,7 +33,7 @@ valarray<double> cross(const valarray<double> &a, const valarray<double> &b) {
     return c;
 }
 
-std::array<std::string, 6> tet_metric_labels = {"total tet number: ",
+inline const std::array<std::string, 6> tet_metric_labels = {"total tet number: ",
     "active tet number: ",
     "minimum radius ratio among all tets: ",
     "minimum radius ratio amond active tets: ",

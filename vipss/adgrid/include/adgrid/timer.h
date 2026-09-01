@@ -19,9 +19,9 @@
 //currently, the zero crossing test is using linear programming based on Gurobi package.
 const int timer_amount = 10;
 
-std::array<double, timer_amount> profileTimer = {0,0,0,0,0,0,0,0,0,0};
+inline std::array<double, timer_amount> profileTimer = {0,0,0,0,0,0,0,0,0,0};
 
-std::array<std::string, timer_amount> time_label = {"total time: ",
+inline const std::array<std::string, timer_amount> time_label = {"total time: ",
     "get active multiples: ",
     "single func: ",
     "two func: ",
@@ -139,4 +139,3 @@ bool save_timings(const std::string& filename,
 }
 
 #endif /*timer_h*/
-
