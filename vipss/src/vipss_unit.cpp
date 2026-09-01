@@ -5,6 +5,7 @@
 #include "SimpleOctree.h"
 #include "test_timing.h"
 #include "color.h"
+#include <cmath>
 #include <numeric>
 
 typedef std::chrono::high_resolution_clock Clock;
@@ -612,12 +613,17 @@ void VIPSSUnit::BuildNNHRBFFunctions()
     // s_func_vals_.clear();
     local_vipss_.BuildHRBFPerNode();
     local_vipss_.SetThis(); 
-    // local_vipss_.dummy_sign_ = LocalVipss::NNDistFunction(R3Pt(local_vipss_.voro_gen_.dummy_sign_pt_[0],
-    //                                                            local_vipss_.voro_gen_.dummy_sign_pt_[1], 
-    //                                                            local_vipss_.voro_gen_.dummy_sign_pt_[2]));    
-    if(abs(local_vipss_.dummy_sign_ ) > 1e-18)
-    {
-        local_vipss_.dummy_sign_ = local_vipss_.dummy_sign_ / abs(local_vipss_.dummy_sign_);
+    const double dummy_value = LocalVipss::NNDistFunction(
+        R3Pt(local_vipss_.voro_gen_.dummy_sign_pt_[0],
+             local_vipss_.voro_gen_.dummy_sign_pt_[1],
+             local_vipss_.voro_gen_.dummy_sign_pt_[2]));
+    if (std::isfinite(dummy_value) && std::abs(dummy_value) > 1e-18) {
+        local_vipss_.dummy_sign_ = std::copysign(1.0, dummy_value);
+    } else {
+        // Signed-distance convention: positive is outside.  This also keeps
+        // unsupported samples away from the zero level set when the dummy
+        // point itself has no natural-neighbor support.
+        local_vipss_.dummy_sign_ = 1.0;
     }
     std::cout << " ********** dummy pt sign val : " << local_vipss_.dummy_sign_ << std::endl;
                                                         

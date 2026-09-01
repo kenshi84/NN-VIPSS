@@ -1217,8 +1217,10 @@ double LocalVipss::NatureNeighborDistanceFunctionOMP(const tetgenmesh::point cur
     {
         return arma::dot(nn_dist_vec_, nn_volume_vec_) / volume_sum;
     } 
-    // return dummy_sign_;;
-    return 0;
+    // Points without enough natural-neighbor support are outside the sampled
+    // domain.  Give them the established exterior sign rather than treating
+    // them as points lying exactly on the isosurface.
+    return dummy_sign_;
 }
 
 double LocalVipss::NatureNeighborGradientOMP(const tetgenmesh::point cur_pt, double* gradient) const
@@ -1301,7 +1303,9 @@ double LocalVipss::NatureNeighborGradientOMP(const tetgenmesh::point cur_pt, dou
         // gradient[2] += partial_grad[2];
         return arma::dot(nn_dist_vec_, nn_volume_vec_) / volume_sum;
     }
-    return 0;
+    // The gradient was initialized to zero above; use the exterior value for
+    // unsupported points instead of introducing a false zero level set.
+    return dummy_sign_;
 }
 
 

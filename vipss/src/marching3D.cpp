@@ -3,6 +3,7 @@
 #include <cassert>
 #include <unordered_map>
 #include <algorithm>
+#include <cmath>
 #include <numeric>
 
 namespace {
@@ -193,7 +194,19 @@ void get_linear_root(const std::array<Float, N>& p1, const std::array<Float, N>&
 // compute a cubic root in (0,1) given values and gradients at two endpoints
 template <typename Float>
 Float get_cubic_root(Float val1, Float val2, Float g1, Float g2) {
-  assert(val1 * val2 < 0);
+  assert(std::isfinite(val1) && std::isfinite(val2));
+
+  // An isosurface can pass exactly through a grid vertex.  The marching
+  // lookup tables classify zero as non-positive, so such an endpoint can
+  // legitimately reach this routine even though it is not a strict sign
+  // change.
+  if (val1 == 0) {
+    return 0;
+  }
+  if (val2 == 0) {
+    return 1;
+  }
+  assert((val1 < 0 && val2 > 0) || (val1 > 0 && val2 < 0));
 
   // make sure val1 < 0 and val2 > 0
   if (val1 > 0) {
@@ -252,8 +265,9 @@ void get_cubic_root(const std::array<Float, 4>& p1, const std::array<Float, 4>& 
                     const Float val1, const Float val2, const std::array<Float, 4>& grad1,
                     const std::array<Float, 4>& grad2,
                     std::array<Float, 3>& output) {
-  // require val1 and val2 to have different signs
-  assert(val1 * val2 < 0);
+  // Zero is allowed when the isosurface passes through an endpoint.
+  assert(val1 == 0 || val2 == 0 ||
+         (val1 < 0 && val2 > 0) || (val1 > 0 && val2 < 0));
 
   // directional derivative
   const std::array<Float, 4> p1p2 = {p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2], p2[3] - p1[3]};
@@ -273,8 +287,9 @@ void get_cubic_root(const std::array<Float, 3>& p1, const std::array<Float, 3>& 
                     const Float val1, const Float val2, const std::array<Float, 3>& grad1,
                     const std::array<Float, 3>& grad2,
                     std::array<Float, 3>& output) {
-    // require val1 and val2 to have different signs
-    assert(val1 * val2 < 0);
+    // Zero is allowed when the isosurface passes through an endpoint.
+    assert(val1 == 0 || val2 == 0 ||
+           (val1 < 0 && val2 > 0) || (val1 > 0 && val2 < 0));
     
     // directional derivative
     const std::array<Float, 3> p1p2 = {p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]};
